@@ -163,97 +163,36 @@ def _merge_group(group: List[Dict]) -> Dict:
 
 
 def run_mode1_comparison(ref_path: str, final_path: str) -> tuple[str, int]:
-    """
-    Run Mode 1: PAGES-2025 comparison.
-    
-    Returns:
-        (output_pdf_path, num_issues)
-    """
-    temp_dir = create_temp_dir_for_session()
-    output_path = os.path.join(temp_dir, "mode1_result.pdf")
-    
-    try:
-        ref_doc = fitz.open(ref_path)
-        final_doc = fitz.open(final_path)
-        
-        num_pages = min(ref_doc.page_count, final_doc.page_count)
-        num_issues = 0
-        
-        # Collect annotations to merge
-        all_annotations = []
-        
-        for i in range(num_pages):
-            ref_page = ref_doc.load_page(i)
-            final_page = final_doc.load_page(i)
-            
-            # Get issues from comparison
-            page_annotations = []
-            
-            # Page size check
-            ref_rect = ref_page.mediabox
-            final_rect = final_page.mediabox
-            ref_w, ref_h = ref_rect.width, ref_rect.height
-            final_w, final_h = final_rect.width, final_rect.height
-            dw = abs(final_w - ref_w) / ref_w if ref_w else 0
-            dh = abs(final_h - ref_h) / ref_h if ref_h else 0
-            
-            if dw > PAGE_SIZE_TOLERANCE or dh > PAGE_SIZE_TOLERANCE:
-                msg = f"Page size diff: W {ref_w:.1f}→{final_w:.1f} ({dw*100:.1f}%), H {ref_h:.1f}→{final_h:.1f} ({dh*100:.1f}%)"
-                page_annotations.append({
-                    "rect": final_rect,
-                    "content": msg,
-                    "color": (1, 0, 0),
-                    "title": "Mode1-PageSize"
-                })
-            
-            # Image size check
-            from tool_compare_pages_2025 import get_main_image_bbox
-            ref_img_rect = get_main_image_bbox(ref_page)
-            final_img_rect = get_main_image_bbox(final_page)
-            
-            if ref_img_rect and final_img_rect:
-                ref_w_i = ref_img_rect.width
-                final_w_i = final_img_rect.width
-                dw_i = abs(final_w_i - ref_w_i) / ref_w_i if ref_w_i else 0
-                
-                if dw_i > IMAGE_SIZE_TOLERANCE:
-                    msg = f"Image size diff: {ref_w_i:.1f}→{final_w_i:.1f} ({dw_i*100:.1f}%)"
-                    page_annotations.append({
-                        "rect": final_img_rect,
-                        "content": msg,
-                        "color": (1, 0.5, 0),
-                        "title": "Mode1-ImageSize"
-                    })
-            
-            # Merge nearby annotations on this page
-            merged = merge_nearby_rects(page_annotations, threshold=25.0)
-            
-            # Add merged annotations to PDF
-            for annot_data in merged:
-                try:
-                    annot = final_page.add_rect_annot(annot_data["rect"])
-                    annot.set_colors(stroke=annot_data["color"])
-                    annot.set_border(width=2)
-                    annot.set_info(
-                        title=annot_data["title"],
-                        content=annot_data["content"],
-                        subject="Layout check"
-                    )
-                    annot.update()
-                    num_issues += annot_data.get("merged_count", 1)
-                except:
-                    pass
-        
-        final_doc.save(output_path, garbage=4, deflate=True)
-        ref_doc.close()
-        final_doc.close()
-        
-        return output_path, num_issues
-    except Exception as e:
-        st.error(f"Error in Mode 1 comparison: {e}")
-        import traceback
-        st.exception(e)
-        return "", 0
+	"""
+	Mode 1: Compare product images using hash-based pairing.
+	Returns (output_pdf_path, num_annotations)
+	"""
+	temp_dir = create_temp_dir_for_session()
+	output_path = os.path.join(temp_dir, "mode1_result.pdf")
+	
+	try:
+		# Import the new product comparison logic
+		from tool_compare_pages_2025 import run
+		
+		# Run product extraction and comparison
+		print("🔍 Mode 1: Extracting and comparing products...")
+		run(ref_path, final_path, output_path)
+		
+		# Count annotations in output PDF
+		doc = fitz.open(output_path)
+		num_annotations = 0
+		for page in doc:
+			annots = list(page.annots())
+			num_annotations += len(annots)
+		doc.close()
+		
+		return output_path, num_annotations
+		
+	except Exception as e:
+		st.error(f"Error in Mode 1 comparison: {e}")
+		import traceback
+		st.exception(e)
+		return "", 0
 
 
 def run_mode2_comparison(ref_path: str, final_path: str, client) -> tuple[str, List[Dict]]:
@@ -378,81 +317,60 @@ def run_mode2_comparison(ref_path: str, final_path: str, client) -> tuple[str, L
 
 
 def run_mode3_comparison(ref_path: str, final_path: str) -> tuple[str, Dict]:
-    """
-    Run Mode 3: 0ASSEMBLAGE_PDF comparison.
-    
-    Returns:
-        (output_pdf_path, results_dict)
-    """
-    temp_dir = create_temp_dir_for_session()
-    output_path = os.path.join(temp_dir, "mode3_result.pdf")
-    
-    results = {
-        "missing_texts": [],
-        "extra_texts": [],
-        "total_pages": 0
-    }
-    
+    """Mode 3: Compare 0ASSEMBLAGE_PDF vs final PDF - annotates BOTH PDFs"""
     try:
+        # Use temp_dir for output paths
+        temp_dir = create_temp_dir_for_session()
+        output_ref = os.path.join(temp_dir, "mode3_ref_result.pdf")
+        output_final = os.path.join(temp_dir, "mode3_final_result.pdf")
+        
+        results = {
+            "total_pages": 0,
+            "missing_texts": [],
+            "extra_texts": []
+        }
+        
+        # Open reference PDF for annotation
+        ref_doc = fitz.open(ref_path)
         ref_pages = extract_page_words_with_boxes(ref_path)
         final_doc = fitz.open(final_path)
         
-        num_pages = min(len(ref_pages), final_doc.page_count)
+        num_pages = min(len(ref_pages), final_doc.page_count, ref_doc.page_count)
         results["total_pages"] = num_pages
-        
-        from difflib import SequenceMatcher
         
         progress_bar = st.progress(0)
         
+        # Annotate BOTH PDFs
         for i in range(num_pages):
+            ref_page = ref_doc.load_page(i)
             ref_page_dict = ref_pages[i]
             final_page = final_doc.load_page(i)
             
-            compare_pages_assemblage(ref_page_dict, final_page, i)
-            
-            # Count differences for results
-            ref_words_info = ref_page_dict["words"]
-            ref_words = [w["text"] for w in ref_words_info]
-            final_words_raw = final_page.get_text("words")
-            final_words_info = [
-                {"text": t, "rect": fitz.Rect(x0, y0, x1, y1)}
-                for x0, y0, x1, y1, t, *_ in final_words_raw
-            ]
-            final_words = [w["text"] for w in final_words_info]
-            
-            from tool_compare_assemblage import _normalize_word
-            ref_norm = [_normalize_word(w) for w in ref_words]
-            final_norm = [_normalize_word(w) for w in final_words]
-            
-            s = SequenceMatcher(None, ref_norm, final_norm)
-            
-            for tag, i1, i2, j1, j2 in s.get_opcodes():
-                if tag in ("delete", "replace"):
-                    for k in range(i1, i2):
-                        results["missing_texts"].append({
-                            "page": i + 1,
-                            "text": ref_words_info[k]["text"]
-                        })
-                if tag in ("insert", "replace"):
-                    for k in range(j1, j2):
-                        results["extra_texts"].append({
-                            "page": i + 1,
-                            "text": final_words_info[k]["text"]
-                        })
+            # This function now modifies both pages
+            compare_pages_assemblage(ref_page, ref_page_dict, final_page, i)
             
             progress_bar.progress((i + 1) / num_pages)
         
-        final_doc.save(output_path, garbage=4, deflate=True)
+        # Save BOTH annotated PDFs
+        ref_doc.save(output_ref, garbage=4, deflate=True)
+        ref_doc.close()
+        
+        final_doc.save(output_final, garbage=4, deflate=True)
         final_doc.close()
         
         progress_bar.empty()
         
-        return output_path, results
+        # Store BOTH paths in session state
+        st.session_state['mode3_ref_pdf'] = output_ref
+        st.session_state['mode3_final_pdf'] = output_final
+        
+        # Return final as primary result for backward compatibility
+        return output_final, results
     except Exception as e:
-        st.error(f"Error in Mode 3 comparison: {e}")
+        st.error(f"Error in Mode 3 comparison: {str(e)}")
         import traceback
-        st.exception(e)
-        return "", results
+        traceback.print_exc()
+        return None, None
 
 
 def main():
@@ -460,7 +378,6 @@ def main():
     
     # Sidebar
     st.sidebar.header("⚙️ Configuration")
-    
     # Mode selection
     mode_options = {
         "PAGES_2025": "Mode 1: PAGES-2025 ⇄ PDF (final)",
@@ -468,13 +385,37 @@ def main():
         "ASSEMBLAGE": "Mode 3: 0ASSEMBLAGE_PDF ⇄ PDF (final)"
     }
     
-    mode_key = st.sidebar.radio(
-        "📋 Select Comparison Mode:",
-        list(mode_options.keys()),
-        format_func=lambda x: mode_options[x],
-        key="mode_selection"
-    )
-    
+    # Sidebar Configuration
+    with st.sidebar:
+        st.markdown("---")
+        st.subheader("⚙️ Configuration")
+        
+        # Mode selection
+        mode_key = st.radio(
+            "Comparison Mode",
+            list(mode_options.keys()),
+            format_func=lambda x: mode_options[x],
+            key="selected_mode"
+        )
+        
+        # Mode 2: API Key Configuration
+        if mode_key == "PAGES_LASOLUTION":
+            st.markdown("---")
+            st.markdown("##### 🔑 OpenAI API Key (Required for Mode 2)")
+            
+            api_key_input = st.text_input(
+                "Enter your OpenAI API Key",
+                type="password",
+                placeholder="sk-...",
+                help="Required for GPT verification in Mode 2",
+                key="mode2_api_key_sidebar"
+            )
+            
+            if api_key_input:
+                os.environ["OPENAI_API_KEY"] = api_key_input
+                st.success("✓ API key configured")
+            else:
+                st.warning("⚠️ API key required")
     # Mode description
     if mode_key == "PAGES_2025":
         st.sidebar.info("🔵 **Mode 1**: Compare page sizes and main image dimensions between PAGES-2025 catalog and final PDF.")
@@ -583,27 +524,30 @@ def main():
     # Mode-specific setup
     if mode_key == "PAGES_LASOLUTION":
         # Mode 2 needs OpenAI client
-        st.sidebar.markdown("---")
-        st.sidebar.subheader("🤖 AI Configuration")
+        st.markdown("### 🤖 Mode 2: GPT AI Verification")
+        st.markdown("Use GPT AI to verify if popup annotation corrections have been implemented in final PDF.")
+        st.markdown("---")
         
-        client = setup_openai_client_with_ui()
-        
-        if not client:
-            st.error("❌ OpenAI API key required for Mode 2. Please configure in sidebar.")
-            return
-        
-        # Preview annotations
+        # Get client from API key in sidebar
+        from tool_compare_lasolution_2026 import get_openai_client
         try:
-            annotations = extract_popup_annotations(left_path)
-            st.sidebar.info(f"📝 Found **{len(annotations)}** annotations in reference PDF")
-            
-            if annotations:
-                estimated_cost = len(annotations) * 0.0001  # Rough estimate
-                st.sidebar.warning(f"💰 Estimated cost: ~${estimated_cost:.4f}")
-        except:
-            pass
+            client = get_openai_client()
+            if client:
+                st.success("✓ API key configured - ready to verify annotations")
+                
+                # Preview annotations
+                try:
+                    annotations = extract_popup_annotations(left_path)
+                    st.info(f"📝 Found **{len(annotations)}** annotations in reference PDF to verify")
+                except Exception as e:
+                    st.warning(f"Could not preview annotations: {e}")
+            else:
+                st.error("❌ Cannot proceed without API key. Please configure in sidebar.")
+                return
+        except Exception as e:
+            st.error(f"❌ API key error: {e}")
+            return
     
-    # Comparison button
     st.markdown("### 🎯 Start Comparison")
     
     col1, col2 = st.columns([3, 1])
@@ -629,6 +573,7 @@ def main():
                 
                 elif mode_key == "PAGES_LASOLUTION":
                     # Mode 2
+                    client = setup_openai_client_with_ui() # Re-initialize client with potentially new API key
                     output_path, results = run_mode2_comparison(left_path, right_path, client)
                     
                     if output_path:
@@ -736,49 +681,96 @@ def main():
         
         st.success("✅ Comparison complete! View results below or download PDFs.")
         
-        # PDF Viewers - Same as preview
+        # PDF Viewers - Show BOTH PDFs for Mode 3
         st.markdown("---")
-        st.markdown("### 📄 Result PDFs with Annotations")
         
-        col_left, col_right = st.columns(2)
-        
-        with col_left:
-            st.markdown("**📄 Reference PDF**")
-            st.caption(f"📁 {os.path.basename(left_path)}")
+        if mode_key == "ASSEMBLAGE" and 'mode3_ref_pdf' in st.session_state and 'mode3_final_pdf' in st.session_state:
+            st.markdown("### 📄 Mode 3: Both PDFs with Highlights")
+            st.caption("🔴 Red = Deleted/Changed | 🟢 Green = Added/Changed | 🔵 Blue = Moved")
             
-            from pdf_viewer_iframe import display_pdf_in_browser
-            display_pdf_in_browser(left_path, height=700)
+            col_left, col_right = st.columns(2)
             
-            # Download button
-            with open(left_path, "rb") as f:
-                st.download_button(
-                    "📥 Download Reference",
-                    data=f,
-                    file_name="reference.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                    key="download_ref_result"
-                )
-        
-        with col_right:
-            st.markdown("**✅ Result PDF (with Annotations)**")
-            result_path = st.session_state.get('result_pdf', right_path)
-            st.caption(f"📁 {os.path.basename(result_path)}")
+            with col_left:
+                st.markdown("**📄 Reference PDF (with RED/BLUE highlights)**")
+                ref_pdf_path = st.session_state['mode3_ref_pdf']
+                st.caption(f"📁 {os.path.basename(left_path)}")
+                
+                from pdf_viewer_iframe import display_pdf_in_browser
+                display_pdf_in_browser(ref_pdf_path, height=700)
+                
+                # Download button
+                with open(ref_pdf_path, "rb") as f:
+                    st.download_button(
+                        "📥 Download Reference",
+                        data=f,
+                        file_name="mode3_reference_annotated.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                        key="download_mode3_ref"
+                    )
             
-            # Display annotated PDF
-            display_pdf_in_browser(result_path, height=700)
+            with col_right:
+                st.markdown("**✅ Final PDF (with GREEN/BLUE highlights)**")
+                final_pdf_path = st.session_state['mode3_final_pdf']
+                st.caption(f"📁 {os.path.basename(right_path)}")
+                
+                # Display annotated PDF
+                display_pdf_in_browser(final_pdf_path, height=700)
+                
+                # Download button
+                with open(final_pdf_path, "rb") as f:
+                    st.download_button(
+                        "💾 Download Final (Annotated)",
+                        data=f,
+                        file_name="mode3_final_annotated.pdf",
+                        mime="application/pdf",
+                        type="primary",
+                        use_container_width=True,
+                        key="download_mode3_final"
+                    )
+        else:
+            # For Mode 1 and Mode 2, show single result
+            st.markdown("### 📄 Result PDFs with Annotations")
             
-            # Download button
-            with open(result_path, "rb") as f:
-                st.download_button(
-                    "💾 Download Result (Annotated)",
-                    data=f,
-                    file_name=f"result_{mode_key.lower()}.pdf",
-                    mime="application/pdf",
-                    type="primary",
-                    use_container_width=True,
-                    key="download_result"
-                )
+            col_left, col_right = st.columns(2)
+            
+            with col_left:
+                st.markdown("**📄 Reference PDF**")
+                st.caption(f"📁 {os.path.basename(left_path)}")
+                
+                from pdf_viewer_iframe import display_pdf_in_browser
+                display_pdf_in_browser(left_path, height=700)
+                
+                # Download button
+                with open(left_path, "rb") as f:
+                    st.download_button(
+                        "📥 Download Reference",
+                        data=f,
+                        file_name="reference.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                        key="download_ref_result"
+                    )
+            
+            with col_right:
+                st.markdown("**✅ Result PDF (with Annotations)**")
+                result_path = st.session_state.get('result_pdf', right_path)
+                st.caption(f"📁 {os.path.basename(result_path)}")
+                
+                # Display annotated PDF
+                display_pdf_in_browser(result_path, height=700)
+                
+                # Download button
+                with open(result_path, "rb") as f:
+                    st.download_button(
+                        "💾 Download Result (Annotated)",
+                        data=f,
+                        file_name=f"result_{mode_key.lower()}.pdf",
+                        mime="application/pdf",
+                        type="primary",
+                        use_container_width=True,
+                        key="download_result"
+                    )
         
         # Annotation Details Viewer
         st.markdown("---")
