@@ -14,7 +14,7 @@ import io
 
 def display_pdf_in_browser(pdf_path: str, height: int = 800):
     """
-    Display PDF using Mozilla PDF.js viewer.
+    Display PDF using direct browser embed.
     Works on both local and Streamlit Cloud.
     
     Args:
@@ -34,16 +34,24 @@ def display_pdf_in_browser(pdf_path: str, height: int = 800):
     
     base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
     
-    # Use Mozilla PDF.js viewer (hosted on CDN)
-    # This works on Streamlit Cloud!
+    # Direct embed - most compatible approach
+    # Uses both <object> and <embed> for maximum browser support
     pdf_display = f'''
-    <iframe
-        src="https://mozilla.github.io/pdf.js/web/viewer.html?file=data:application/pdf;base64,{base64_pdf}"
+    <object
+        data="data:application/pdf;base64,{base64_pdf}"
+        type="application/pdf"
         width="100%"
         height="{height}px"
-        type="application/pdf"
-        style="border: none;"
-    ></iframe>
+        style="border: 2px solid #444; border-radius: 4px;"
+    >
+        <embed
+            src="data:application/pdf;base64,{base64_pdf}"
+            type="application/pdf"
+            width="100%"
+            height="{height}px"
+            style="border: 2px solid #444; border-radius: 4px;"
+        />
+    </object>
     '''
     
     # Render using components.html
