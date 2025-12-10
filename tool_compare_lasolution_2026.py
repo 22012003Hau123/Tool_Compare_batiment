@@ -37,18 +37,30 @@ def get_openai_client() -> Optional[OpenAI]:
 	api_key = None
 	try:
 		import streamlit as st
-		api_key = st.secrets.get("OPENAI_API_KEY", "")
-	except:
-		# Fallback to environment variable if not in Streamlit context
-		api_key = os.getenv("OPENAI_API_KEY", "")
+		# Access secrets directly
+		if hasattr(st, 'secrets') and "OPENAI_API_KEY" in st.secrets:
+			api_key = st.secrets["OPENAI_API_KEY"]
+			print(f"✓ Loaded API key from st.secrets (length: {len(api_key)})")
+		else:
+			print("⚠ st.secrets.OPENAI_API_KEY not found")
+	except Exception as e:
+		print(f"⚠ Could not access st.secrets: {e}")
 	
-	if not api_key or api_key == "your-api-key-here" or api_key == "sk-proj-your-key-here":
+	# Fallback to environment variable
+	if not api_key:
+		api_key = os.getenv("OPENAI_API_KEY", "")
+		if api_key:
+			print(f"✓ Loaded API key from environment (length: {len(api_key)})")
+	
+	if not api_key or api_key in ["your-api-key-here", "sk-proj-your-key-here"]:
 		print("Error: OPENAI_API_KEY not configured.")
 		print("Please set OPENAI_API_KEY in Streamlit secrets or .env file.")
 		return None
 	
 	try:
-		return OpenAI(api_key=api_key)
+		client = OpenAI(api_key=api_key)
+		print("✓ OpenAI client initialized successfully")
+		return client
 	except Exception as e:
 		print(f"Error initializing OpenAI client: {e}")
 		return None
