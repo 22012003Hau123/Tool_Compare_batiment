@@ -397,25 +397,6 @@ def main():
             format_func=lambda x: mode_options[x],
             key="selected_mode"
         )
-        
-        # Mode 2: API Key Configuration
-        if mode_key == "PAGES_LASOLUTION":
-            st.markdown("---")
-            st.markdown("##### 🔑 OpenAI API Key (Required for Mode 2)")
-            
-            api_key_input = st.text_input(
-                "Enter your OpenAI API Key",
-                type="password",
-                placeholder="sk-...",
-                help="Required for GPT verification in Mode 2",
-                key="mode2_api_key_sidebar"
-            )
-            
-            if api_key_input:
-                os.environ["OPENAI_API_KEY"] = api_key_input
-                st.success("✓ API key configured")
-            else:
-                st.warning("⚠️ API key required")
     # Mode description
     if mode_key == "PAGES_2025":
         st.sidebar.info("🔵 **Mode 1**: Compare page sizes and main image dimensions between PAGES-2025 catalog and final PDF.")
