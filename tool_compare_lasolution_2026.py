@@ -24,7 +24,7 @@ GPT_MODEL = os.getenv("GPT_MODEL", "gpt-4o-mini")
 
 def get_openai_client() -> Optional[OpenAI]:
 	"""
-	Khởi tạo OpenAI client từ environment variable.
+	Khởi tạo OpenAI client từ Streamlit secrets hoặc environment variable.
 	
 	Returns:
 		OpenAI client nếu thành công, None nếu không có API key hoặc import error
@@ -33,14 +33,22 @@ def get_openai_client() -> Optional[OpenAI]:
 		print("Error: openai package not installed. Run: pip install openai")
 		return None
 	
-	if not OPENAI_API_KEY or OPENAI_API_KEY == "your-api-key-here":
+	# Try to get API key from Streamlit secrets first, then environment
+	api_key = None
+	try:
+		import streamlit as st
+		api_key = st.secrets.get("OPENAI_API_KEY", "")
+	except:
+		# Fallback to environment variable if not in Streamlit context
+		api_key = os.getenv("OPENAI_API_KEY", "")
+	
+	if not api_key or api_key == "your-api-key-here" or api_key == "sk-proj-your-key-here":
 		print("Error: OPENAI_API_KEY not configured.")
-		print("Please set OPENAI_API_KEY in .env file or environment variable.")
-		print("See .env.example for template.")
+		print("Please set OPENAI_API_KEY in Streamlit secrets or .env file.")
 		return None
 	
 	try:
-		return OpenAI(api_key=OPENAI_API_KEY)
+		return OpenAI(api_key=api_key)
 	except Exception as e:
 		print(f"Error initializing OpenAI client: {e}")
 		return None
