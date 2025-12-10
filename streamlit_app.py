@@ -509,25 +509,13 @@ def main():
         st.markdown("Use GPT AI to verify if popup annotation corrections have been implemented in final PDF.")
         st.markdown("---")
         
-        # Get client from API key in sidebar
-        from tool_compare_lasolution_2026 import get_openai_client
+        # Preview annotations from reference PDF
+        st.markdown("### 📝 Annotation Preview")
         try:
-            client = get_openai_client()
-            if client:
-                st.success("✓ API key configured - ready to verify annotations")
-                
-                # Preview annotations
-                try:
-                    annotations = extract_popup_annotations(left_path)
-                    st.info(f"📝 Found **{len(annotations)}** annotations in reference PDF to verify")
-                except Exception as e:
-                    st.warning(f"Could not preview annotations: {e}")
-            else:
-                st.error("❌ Cannot proceed without API key. Please configure in sidebar.")
-                return
+            annotations = extract_popup_annotations(left_path)
+            st.info(f"📝 Found **{len(annotations)}** annotations in reference PDF to verify")
         except Exception as e:
-            st.error(f"❌ API key error: {e}")
-            return
+            st.warning(f"Could not preview annotations: {e}")
     
     st.markdown("### 🎯 Start Comparison")
     
